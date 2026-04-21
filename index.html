@@ -105,7 +105,7 @@
       position: fixed;
       left: 1.5rem;
       bottom: 1.5rem;
-      width: 285px;
+      width: 570px;
       outline: solid 1px black;
       background: #000;
       z-index: 200;
@@ -131,13 +131,13 @@
     }
     #videoWrap {
       position: relative;
-      width: 285px;
-      height: 214px;    /* 285 × (3/4) ≈ 214  (380×0.75 = 285) */
+      width: 570px;
+      height: 428px;
       overflow: hidden;
     }
     #webcamVideo {
-      width: 285px;
-      height: 214px;
+      width: 570px;
+      height: 428px;
       display: block;
       object-fit: cover;
       transform: scaleX(-1);  /* mirror for selfie view */
@@ -145,8 +145,8 @@
     #gestureOverlay {
       position: absolute;
       top: 0; left: 0;
-      width: 285px;
-      height: 214px;
+      width: 570px;
+      height: 428px;
       transform: scaleX(-1);  /* same mirror so skeleton aligns with video */
       pointer-events: none;
     }
@@ -190,7 +190,7 @@
   </div>
   <div id="videoWrap">
     <video id="webcamVideo" autoplay muted playsinline></video>
-    <canvas id="gestureOverlay" width="285" height="214"></canvas>
+    <canvas id="gestureOverlay" width="570" height="428"></canvas>
   </div>
   <div id="gpStatus">—</div>
   <div id="gpGuide">✊ fist = clear &nbsp;·&nbsp; ☝ point L/R = steer &nbsp;·&nbsp; 🖐 open L/R = steer<br>✌ V-sign = thrust &nbsp;·&nbsp; 💨 swipe = clear</div>
