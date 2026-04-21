@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Moire</title>
+  <style>
+    * { box-sizing: border-box; }
+    html {
+      font-family: 'IBM Plex Mono', 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      background: #ddd;
+    }
+    body { margin: 0; overflow: hidden; }
+
+    #moireCanvas, #shipCanvas {
+      position: absolute;
+      left: 0; top: 0;
+      display: block;
+    }
+
+    /* ── Help panel (bottom-right) ── */
+    #helpPanel {
+      position: fixed;
+      right: 1.5rem;
+      bottom: 1.5rem;
+      outline: solid 1px black;
+      background: rgba(255,255,255,0.85);
+      padding: 0.75rem 2ch;
+      max-width: calc(100% - 3rem);
+      z-index: 200;
+    }
+    #helpToggle {
+      position: fixed;
+      right: 1.5rem;
+      bottom: 1.5rem;
+      outline: solid 1px black;
+      background: rgba(255,255,255,0.85);
+      padding: 0.2rem 0.5ch;
+      cursor: pointer;
+      z-index: 200;
+      display: none;
+      user-select: none;
+    }
+    .keytip {
+      outline: solid 1px black;
+      padding: 0 0.5ch;
+      display: inline-block;
+      user-select: none;
+      cursor: pointer;
+    }
+    .keytip:active { background: #000; color: #fff; }
+
+    /* ── Audio bar (top-center) ── */
+    #audioPanel {
+      position: fixed;
+      top: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 200;
+    }
+    #audioBtn {
+      background: rgba(255,255,255,0.85);
+      outline: solid 1px black;
+      padding: 2px 7px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      border: none;
+      user-select: none;
+    }
+    #audioBtn.on { background: #000; color: #fff; }
+    #audioMeter {
+      width: 80px;
+      height: 6px;
+      outline: solid 1px rgba(0,0,0,0.4);
+      background: rgba(0,0,0,0.1);
+    }
+    #audioMeterFill {
+      height: 100%;
+      width: 0%;
+      background: black;
+    }
+
+    /* ── Gesture / webcam panel (bottom-left) ── */
+    #camOpenBtn {
+      position: fixed;
+      left: 1.5rem;
+      bottom: 1.5rem;
+      outline: solid 1px black;
+      background: rgba(255,255,255,0.85);
+      padding: 0.35rem 1ch;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      border: none;
+      z-index: 200;
+      user-select: none;
+    }
+    #gesturePanel {
+      position: fixed;
+      left: 1.5rem;
+      bottom: 1.5rem;
+      width: 285px;
+      outline: solid 1px black;
+      background: #000;
+      z-index: 200;
+      display: none;
+    }
+    #gesturePanel.open { display: block; }
+    #gpBar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 8px;
+      background: rgba(255,255,255,0.92);
+      border-bottom: solid 1px black;
+      font-size: 12px;
+    }
+    #gpClose {
+      border: solid 1px black;
+      background: none;
+      font: inherit;
+      font-size: 11px;
+      padding: 1px 5px;
+      cursor: pointer;
+    }
+    #videoWrap {
+      position: relative;
+      width: 285px;
+      height: 214px;    /* 285 × (3/4) ≈ 214  (380×0.75 = 285) */
+      overflow: hidden;
+    }
+    #webcamVideo {
+      width: 285px;
+      height: 214px;
+      display: block;
+      object-fit: cover;
+      transform: scaleX(-1);  /* mirror for selfie view */
+    }
+    #gestureOverlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 285px;
+      height: 214px;
+      transform: scaleX(-1);  /* same mirror so skeleton aligns with video */
+      pointer-events: none;
+    }
+    #gpStatus {
+      padding: 3px 8px;
+      font-size: 11px;
+      color: #ccc;
+      min-height: 20px;
+      background: rgba(0,0,0,0.8);
+      letter-spacing: 0.03em;
+    }
+    #gpGuide {
+      padding: 4px 8px 5px;
+      font-size: 10px;
+      color: #888;
+      background: rgba(0,0,0,0.6);
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Moire canvases (original two-canvas architecture) -->
+<canvas id="moireCanvas"></canvas>
+<canvas id="shipCanvas"></canvas>
+
+<!-- Audio panel -->
+<div id="audioPanel">
+  <button id="audioBtn" onclick="toggleAudio()">mic</button>
+  <div id="audioMeter"><div id="audioMeterFill"></div></div>
+</div>
+
+<!-- Gesture cam open button -->
+<button id="camOpenBtn" onclick="openCam()">gesture cam</button>
+
+<!-- Gesture / webcam panel -->
+<div id="gesturePanel">
+  <div id="gpBar">
+    <span>gesture cam</span>
+    <button id="gpClose" onclick="closeCam()">close ✕</button>
+  </div>
+  <div id="videoWrap">
+    <video id="webcamVideo" autoplay muted playsinline></video>
+    <canvas id="gestureOverlay" width="285" height="214"></canvas>
+  </div>
+  <div id="gpStatus">—</div>
+  <div id="gpGuide">✊ fist = clear &nbsp;·&nbsp; ☝ point L/R = steer &nbsp;·&nbsp; 🖐 open L/R = steer<br>✌ V-sign = thrust &nbsp;·&nbsp; 💨 swipe = clear</div>
+</div>
+
+<!-- Help panel -->
+<div id="helpPanel">
+  <div style="margin-bottom:0.75rem;max-width:52ch">
+    Moire: angular skyscapes via <a href="https://en.wikipedia.org/wiki/Asteroids_(video_game)" target="_blank">Asteroids</a>-like controls.
+  </div>
+  <div style="margin-bottom:0.4rem">Move</div>
+  <div style="margin-bottom:0.75rem">
+    <span class="keytip" onclick="tapKey('a')">a</span> ↪ &nbsp;
+    <span class="keytip" onclick="tapKey('w')">w</span> thrust &nbsp;
+    <span class="keytip" onclick="tapKey('d')">d</span> ↩
+  </div>
+  <div style="margin-bottom:0.4rem">Special</div>
+  <div style="margin-bottom:0.75rem">
+    <span class="keytip" onclick="tapKey(' ')">space</span> pause &nbsp;
+    <span class="keytip" onclick="tapKey('j')">j</span> save &nbsp;
+    <span class="keytip" onclick="tapKey('l')">l</span> clear &nbsp;
+    <span class="keytip" onclick="tapKey('?')">?</span> help
+  </div>
+  <div style="margin-bottom:0.5rem;color:#666;font-size:11px">
+    Audio: bass = auto-thrust · amplitude = speed + line width + color
+  </div>
+  <div>
+    <a href="https://github.com/constraint-systems/moire" target="_blank">source↗</a>
+    &nbsp;·&nbsp;
+    <span style="cursor:pointer;text-decoration:underline" onclick="toggleHelp()">[hide]</span>
+  </div>
+</div>
+<div id="helpToggle" onclick="toggleHelp()">?</div>
+
+<!-- MediaPipe (optional — gesture cam degrades gracefully if unavailable) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+<script>
+// ================================================================
+//  MOIRE — audio reactive + gesture cam
+//  Original moire logic: https://github.com/constraint-systems/moire
+// ================================================================
+
+// ── Canvas refs ──────────────────────────────────────────────────
+const moireCanvas = document.getElementById('moireCanvas');
+const shipCanvas  = document.getElementById('shipCanvas');
+const mc = moireCanvas.getContext('2d');
+const sc = shipCanvas.getContext('2d');
+
+let W = 0, H = 0, DPR = 1;
+
+// ── Ship state (mirrors original) ───────────────────────────────
+let pos    = [80, 300];   // [x, y]  position
+let vel    = [4,  0];     // [vx,vy] velocity
+let deg    = 0;           // angle in degrees
+let animId = null;
+let paused = false;
+let showHelp = true;
+
+// ── Input maps ───────────────────────────────────────────────────
+const kbKeys  = {};       // keyboard
+const gestKeys = {};      // from hand gestures
+const audKeys  = {};      // from audio analysis
+
+function held(k) { return !!(kbKeys[k] || gestKeys[k] || audKeys[k]); }
+
+// ── Audio state ──────────────────────────────────────────────────
+let audioCtx  = null;
+let analyser  = null;
+let freqBuf   = null;
+let audioOn   = false;
+let amp       = 0;    // overall 0–1
+let bass      = 0;    // low  0–1
+let mid       = 0;    // mid  0–1
+let high      = 0;    // high 0–1
+
+// ── Gesture state ────────────────────────────────────────────────
+let mpHands    = null;
+let mpCamera   = null;
+let camStream  = null;
+let lastClear  = 0;
+
+// Swipe-to-clear: ring buffer of last N wrist x positions (mirrored display space)
+const SWIPE_BUF = 6;
+const wristHistory = [];   // [{x, t}]
+
+
+// ================================================================
+//  SETUP
+// ================================================================
+function setup() {
+  DPR = window.devicePixelRatio || 1;
+  W   = window.innerWidth;
+  H   = window.innerHeight;
+
+  for (const cv of [moireCanvas, shipCanvas]) {
+    cv.width        = W * DPR;
+    cv.height       = H * DPR;
+    cv.style.width  = W + 'px';
+    cv.style.height = H + 'px';
+  }
+
+  // Moire canvas: scale + half-pixel translate for crisp 1px lines
+  mc.setTransform(1, 0, 0, 1, 0, 0);
+  mc.scale(DPR, DPR);
+  mc.translate(0.5, 0.5);
+  mc.fillStyle = 'white';
+  mc.fillRect(0, 0, W, H);
+  mc.lineWidth = 1;
+
+  // Ship canvas: scale only (no translate — shape is filled, not stroked)
+  sc.setTransform(1, 0, 0, 1, 0, 0);
+  sc.scale(DPR, DPR);
+
+  pos = [80, H / 2];
+}
+
+// ── Math helpers (same as original) ─────────────────────────────
+function rot(a, x, y) {
+  return [Math.cos(a) * x - Math.sin(a) * y,
+          Math.sin(a) * x + Math.cos(a) * y];
+}
+function normalize(v) {
+  const l = Math.hypot(v[0], v[1]);
+  return l === 0 ? [0, 0] : [v[0] / l, v[1] / l];
+}
+function vdist(a, b) { return Math.hypot(b[0] - a[0], b[1] - a[1]); }
+
+
+// ================================================================
+//  ANIMATION LOOP
+// ================================================================
+function tick() {
+  animId = requestAnimationFrame(tick);
+  readAudio();
+
+  // ── Rotation ─────────────────────────────────────────────────
+  if (held('d')) deg += 1;
+  if (held('a')) deg -= 1;
+
+  const a = deg * (Math.PI / 180);
+
+  // ── Thrust ───────────────────────────────────────────────────
+  const speedBoost = 1 + amp * 8;   // louder = much faster
+  const target     = [4 * speedBoost * Math.cos(a), 4 * speedBoost * Math.sin(a)];
+  const toTarget   = [target[0] - vel[0], target[1] - vel[1]];
+  const n          = normalize(toTarget);
+  const d          = vdist(target, vel);
+
+  if (held('w')) {
+    const step = Math.min(0.1 + amp * 0.15, d);
+    vel[0] += n[0] * step;
+    vel[1] += n[1] * step;
+  }
+
+  // ── Position + screen-wrap ───────────────────────────────────
+  pos[0] += vel[0];
+  pos[1] += vel[1];
+  if (pos[0] < 0)  pos[0] = W;
+  if (pos[0] > W)  pos[0] = 0;
+  if (pos[1] < 0)  pos[1] = H;
+  if (pos[1] > H)  pos[1] = 0;
+
+  // ── Moire line (persistent, drawn on mc) ─────────────────────
+  const diag = Math.sqrt(W * W + H * H) + 20;
+  const lArm = rot(a - Math.PI - Math.PI / 8, 0, diag);
+  const rArm = rot(a + Math.PI / 8,           0, diag);
+
+  mc.strokeStyle = 'black';
+  mc.lineWidth   = audioOn ? 1 + amp * 3 : 1;
+
+  // Bass bounce: jitter the draw position slightly on each beat
+  const jx = (audioOn && bass > 0.2) ? (Math.random() - 0.5) * bass * 12 : 0;
+  const jy = (audioOn && bass > 0.2) ? (Math.random() - 0.5) * bass * 12 : 0;
+
+  mc.beginPath();
+  mc.moveTo(Math.round(lArm[0] + pos[0] + jx), Math.round(lArm[1] + pos[1] + jy));
+  mc.lineTo(Math.round(pos[0]            + jx), Math.round(pos[1]            + jy));
+  mc.lineTo(Math.round(rArm[0] + pos[0] + jx), Math.round(rArm[1] + pos[1] + jy));
+  mc.stroke();
+
+  // ── Ship (cleared each frame on sc) ──────────────────────────
+  sc.clearRect(0, 0, W, H);
+
+  const nose  = rot(a,  15,     0);
+  const lWing = rot(a, -11.25, -10);
+  const rWing = rot(a, -11.25,  10);
+
+  sc.fillStyle = 'black';
+  sc.beginPath();
+  sc.moveTo(lWing[0] + pos[0], lWing[1] + pos[1]);
+  sc.lineTo(nose[0]  + pos[0], nose[1]  + pos[1]);
+  sc.lineTo(rWing[0] + pos[0], rWing[1] + pos[1]);
+  sc.closePath();
+  sc.fill();
+
+  if (held('w')) {
+    const flame = rot(a, -18.75, 0);
+    sc.fillStyle = '#c0c0c0';
+    sc.beginPath();
+    sc.moveTo(lWing[0] + pos[0], lWing[1] + pos[1]);
+    sc.lineTo(flame[0] + pos[0], flame[1] + pos[1]);
+    sc.lineTo(rWing[0] + pos[0], rWing[1] + pos[1]);
+    sc.closePath();
+    sc.fill();
+  }
+}
+
+
+// ================================================================
+//  AUDIO
+// ================================================================
+async function toggleAudio() {
+  audioOn ? stopAudio() : await startAudio();
+}
+
+async function startAudio() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    audioCtx  = new (window.AudioContext || window.webkitAudioContext)();
+    analyser  = audioCtx.createAnalyser();
+    analyser.fftSize               = 256;
+    analyser.smoothingTimeConstant = 0.78;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    freqBuf  = new Uint8Array(analyser.frequencyBinCount);
+    audioOn  = true;
+    const btn = document.getElementById('audioBtn');
+    btn.textContent = 'mic on';
+    btn.classList.add('on');
+  } catch (e) {
+    console.warn('Audio init failed:', e);
+  }
+}
+
+function stopAudio() {
+  if (audioCtx) audioCtx.close();
+  audioCtx = analyser = freqBuf = null;
+  audioOn = false;
+  amp = bass = mid = high = 0;
+  audKeys['w'] = false;
+  const btn = document.getElementById('audioBtn');
+  btn.textContent = 'mic';
+  btn.classList.remove('on');
+  document.getElementById('audioMeterFill').style.width = '0%';
+}
+
+function readAudio() {
+  if (!audioOn || !analyser) return;
+  analyser.getByteFrequencyData(freqBuf);
+
+  const bins    = freqBuf.length;
+  const bassEnd = Math.max(1,  Math.floor(bins * 0.04));   // ~0–100 Hz
+  const midEnd  = Math.max(2,  Math.floor(bins * 0.22));   // ~100–650 Hz
+
+  let tot = 0, bSum = 0, mSum = 0, hSum = 0;
+  for (let i = 0; i < bins; i++) {
+    tot += freqBuf[i];
+    if      (i < bassEnd) bSum += freqBuf[i];
+    else if (i < midEnd)  mSum += freqBuf[i];
+    else                  hSum += freqBuf[i];
+  }
+
+  amp  = tot  / (bins          * 255);
+  bass = bSum / (bassEnd        * 255);
+  mid  = mSum / ((midEnd - bassEnd) * 255);
+  high = hSum / ((bins  - midEnd)   * 255);
+
+  document.getElementById('audioMeterFill').style.width =
+    Math.min(100, amp * 280) + '%';
+
+  // Any sound → auto-thrust (ship moves whenever mic hears something)
+  audKeys['w'] = amp > 0.012;
+}
+
+
+// ================================================================
+//  GESTURE CAM
+// ================================================================
+async function openCam() {
+  document.getElementById('gesturePanel').classList.add('open');
+  document.getElementById('camOpenBtn').style.display = 'none';
+
+  const video  = document.getElementById('webcamVideo');
+  const status = document.getElementById('gpStatus');
+  status.textContent = 'starting camera…';
+
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 380, height: 285, facingMode: 'user' },
+      audio: false
+    });
+    video.srcObject = camStream;
+    await video.play();
+
+    if (typeof Hands !== 'undefined') {
+      status.textContent = 'loading model…';
+      mpHands = new Hands({
+        locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+      });
+      mpHands.setOptions({
+        maxNumHands:            1,
+        modelComplexity:        0,
+        minDetectionConfidence: 0.65,
+        minTrackingConfidence:  0.5
+      });
+      mpHands.onResults(onHandResults);
+
+      mpCamera = new Camera(video, {
+        onFrame: async () => { await mpHands.send({ image: video }); },
+        width: 380, height: 285
+      });
+      mpCamera.start();
+      status.textContent = 'ready — show your hand';
+    } else {
+      status.textContent = 'camera on · gesture model unavailable';
+    }
+  } catch (e) {
+    status.textContent = 'error: ' + e.message;
+  }
+}
+
+function closeCam() {
+  if (mpCamera) { mpCamera.stop();  mpCamera = null; }
+  if (mpHands)  { mpHands.close();  mpHands  = null; }
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+
+  const video = document.getElementById('webcamVideo');
+  video.srcObject = null;
+  Object.keys(gestKeys).forEach(k => delete gestKeys[k]);
+
+  document.getElementById('gesturePanel').classList.remove('open');
+  document.getElementById('camOpenBtn').style.display = '';
+  document.getElementById('gpStatus').textContent = '—';
+}
+
+// ── MediaPipe results callback ──────────────────────────────────
+function onHandResults(results) {
+  const overlay = document.getElementById('gestureOverlay');
+  const ctx     = overlay.getContext('2d');
+  ctx.clearRect(0, 0, 285, 214);
+  Object.keys(gestKeys).forEach(k => delete gestKeys[k]);
+
+  if (!results.multiHandLandmarks?.length) {
+    wristHistory.length = 0;
+    document.getElementById('gpStatus').textContent = 'no hand detected';
+    return;
+  }
+
+  const lm = results.multiHandLandmarks[0];
+
+  // Draw skeleton
+  if (typeof drawConnectors !== 'undefined') {
+    drawConnectors(ctx, lm, HAND_CONNECTIONS, { color: '#00e676', lineWidth: 1.5 });
+    drawLandmarks(ctx, lm, { color: '#ff1744', lineWidth: 1, radius: 2.5 });
+  }
+
+  // Track wrist x in display (mirrored) space for swipe detection
+  const wx = 1 - lm[0].x;
+  const now = Date.now();
+  wristHistory.push({ x: wx, t: now });
+  if (wristHistory.length > SWIPE_BUF) wristHistory.shift();
+
+  // Swipe-to-clear: hand moves > 0.45 of frame width within 400 ms
+  if (wristHistory.length >= SWIPE_BUF && now - lastClear > 600) {
+    const oldest = wristHistory[0];
+    const dx = Math.abs(wx - oldest.x);
+    const dt = now - oldest.t;
+    if (dx > 0.45 && dt < 400) {
+      clearMoire();
+      lastClear = now;
+      wristHistory.length = 0;
+      document.getElementById('gpStatus').textContent = '💨 swipe — cleared!';
+      return;
+    }
+  }
+
+  const g = classifyGesture(lm);
+  document.getElementById('gpStatus').textContent = g.label;
+
+  if (g.thrust)   gestKeys['w'] = true;
+  if (g.rotLeft)  gestKeys['a'] = true;
+  if (g.rotRight) gestKeys['d'] = true;
+  if (g.clear && Date.now() - lastClear > 600) {
+    clearMoire();
+    lastClear = Date.now();
+  }
+}
+
+// ── Hand gesture classifier ─────────────────────────────────────
+function classifyGesture(lm) {
+  // Mirror x so direction matches mirrored display
+  // MediaPipe x=0 → camera left → display right after CSS mirror
+  const mx = x => 1 - x;
+
+  const wrist    = lm[0];
+  const thumbTip = lm[4];
+  const idxTip   = lm[8];  const idxPIP = lm[6]; const idxMCP = lm[5];
+  const midTip   = lm[12]; const midMCP = lm[9];
+  const ringTip  = lm[16]; const ringMCP= lm[13];
+  const pinkyTip = lm[20]; const pinkyMCP=lm[17];
+
+  // Finger extended: tip is meaningfully above its MCP in y (y decreases upward)
+  function ext(tip, mcp) { return tip.y < mcp.y - 0.04; }
+
+  const ie = ext(idxTip,   idxMCP);
+  const me = ext(midTip,   midMCP);
+  const re = ext(ringTip,  ringMCP);
+  const pe = ext(pinkyTip, pinkyMCP);
+  const extN = [ie, me, re, pe].filter(Boolean).length;
+
+  // ── Fist: no fingers up → clear
+  if (extN === 0) return { label: '✊ fist — clear', clear: true };
+
+  // ── Index only: pointing gesture
+  if (ie && !me && !re && !pe) {
+    // Direction from PIP→tip in display space
+    const dx = mx(idxTip.x) - mx(idxPIP.x);
+    const dy = idxTip.y - idxPIP.y;  // negative = pointing up
+
+    if (Math.abs(dx) > Math.abs(dy) * 0.6 && Math.abs(dx) > 0.04) {
+      if (dx < 0) return { label: '👈 point left — steer L', rotLeft:  true };
+      else        return { label: '👉 point right — steer R', rotRight: true };
+    }
+    return { label: '☝ point up — thrust', thrust: true };
+  }
+
+  // ── V / peace: index + middle → thrust
+  if (ie && me && !re && !pe) return { label: '✌ V-sign — thrust', thrust: true };
+
+  // ── Open hand (3–4 fingers): wrist X steers
+  if (extN >= 3) {
+    const wx = mx(wrist.x);
+    if (wx < 0.38) return { label: '🖐 open — steer L', rotLeft:  true };
+    if (wx > 0.62) return { label: '🖐 open — steer R', rotRight: true };
+    return { label: '🖐 open hand — neutral' };
+  }
+
+  return { label: `hand (${extN} fingers)` };
+}
+
+
+// ================================================================
+//  KEYBOARD + CLICK CONTROLS
+// ================================================================
+document.addEventListener('keydown', e => {
+  kbKeys[e.key] = true;
+  if (e.repeat) return;
+  if (e.key === ' ')  { e.preventDefault(); togglePause(); }
+  if (e.key === 'j')  saveImage();
+  if (e.key === 'l')  clearMoire();
+  if (e.key === '?')  toggleHelp();
+});
+document.addEventListener('keyup', e => { kbKeys[e.key] = false; });
+
+// Clickable keytips in help panel — hold for 300 ms
+function tapKey(k) {
+  if (k === ' ')  { togglePause(); return; }
+  if (k === 'j')  { saveImage();   return; }
+  if (k === 'l')  { clearMoire();  return; }
+  if (k === '?')  { toggleHelp();  return; }
+  kbKeys[k] = true;
+  setTimeout(() => { kbKeys[k] = false; }, 300);
+}
+
+function togglePause() {
+  if (paused) {
+    animId = requestAnimationFrame(tick);
+    paused = false;
+  } else {
+    cancelAnimationFrame(animId);
+    paused = true;
+  }
+}
+
+function clearMoire() {
+  mc.fillStyle = 'white';
+  mc.fillRect(-1, -1, W + 2, H + 2);
+}
+
+function saveImage() {
+  moireCanvas.toBlob(blob => {
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = 'moire.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  });
+}
+
+function toggleHelp() {
+  showHelp = !showHelp;
+  document.getElementById('helpPanel').style.display  = showHelp ? '' : 'none';
+  document.getElementById('helpToggle').style.display = showHelp ? 'none' : '';
+}
+
+
+// ================================================================
+//  START
+// ================================================================
+window.addEventListener('resize', setup);
+setup();
+animId = requestAnimationFrame(tick);
+</script>
+</body>
+</html>
